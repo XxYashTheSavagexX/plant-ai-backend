@@ -1,0 +1,7 @@
+venv/
+dataset/
+images/
+__pycache__/
+*.pyc
+history.json
+users.xlsx
