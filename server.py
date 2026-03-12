@@ -200,33 +200,42 @@ def predict():
     pil_image = Image.open(io.BytesIO(file.read())).convert("RGB")
 
     filename = f"{datetime.datetime.now().timestamp()}.jpg"
+    image_path = f"images/{filename}"
 
-    pil_image.save(f"images/{filename}")
+    pil_image.save(image_path)
 
+    # highlight disease areas
     highlighted = highlight_disease(pil_image)
 
     highlight_name = f"highlight_{filename}"
+    highlight_path = f"images/{highlight_name}"
 
-    cv2.imwrite(f"images/{highlight_name}", highlighted)
+    cv2.imwrite(highlight_path, highlighted)
 
-    image = transform(pil_image).unsqueeze(0)
+    # AI prediction
+    image_tensor = transform(pil_image).unsqueeze(0)
 
     with torch.no_grad():
-
-        outputs = model(image)
-
+        outputs = model(image_tensor)
         probs = torch.nn.functional.softmax(outputs, dim=1)
-
         confidence, predicted = torch.max(probs, 1)
 
     raw_name = classes[predicted.item()]
 
-    plant_name = raw_name.replace("___"," - ").replace("_"," ")
+    plant_name = raw_name.replace("___", " - ").replace("_", " ")
 
-    health = 95 if "healthy" in plant_name.lower() else 60
+    # health score
+    health = int(confidence.item() * 100)
 
+    if "healthy" in plant_name.lower():
+        health = 95
+    else:
+        health = max(40, health)
+
+    # explanation + issues
     disease, paragraph, issues, tips = generate_texts(plant_name)
 
+    # care information
     water, sun, soil = care_levels(plant_name)
 
     result = {
