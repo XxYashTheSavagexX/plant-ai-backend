@@ -24,14 +24,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 with open(CLASSES_PATH, "r") as f:
     classes = json.load(f)
 
-num_classes = len(classes)
+num_classes = 50
 
 # -----------------------------
 # LOAD MODEL (ONCE)
 # -----------------------------
 
 model = mobilenet_v2(weights=None)
-model.classifier[1] = torch.nn.Linear(1280, num_classes)
+model.classifier[1] = torch.nn.Linear(1280, 50)
 
 model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
 model.eval()
