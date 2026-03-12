@@ -1,274 +1,232 @@
-from flask import Flask, request, jsonify, send_from_directory
-import torch
-from torchvision import transforms, models
-from torch import nn
-from PIL import Image
-import io
 import os
 import json
-import datetime
-import numpy as np
-import cv2
+import torch
+import torchvision.transforms as transforms
+from torchvision.models import mobilenet_v2
+from flask import Flask, request, jsonify, send_from_directory
+from PIL import Image
 import bcrypt
 
 app = Flask(__name__)
 
-# ---------------- CONFIG ----------------
-
-IMAGE_SIZE = 128
+UPLOAD_FOLDER = "images"
 MODEL_PATH = "plant_model.pth"
-HISTORY_FILE = "history.json"
+CLASSES_PATH = "classes.json"
 USERS_FILE = "users.json"
+HISTORY_FILE = "history.json"
 
-if not os.path.exists("images"):
-    os.makedirs("images")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ---------------- IMAGE TRANSFORM ----------------
+# -----------------------------
+# LOAD CLASSES
+# -----------------------------
 
-transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.ToTensor(),
-])
-
-# ---------------- LOAD CLASSES ----------------
-
-with open("classes.json") as f:
+with open(CLASSES_PATH, "r") as f:
     classes = json.load(f)
 
-# ---------------- LOAD MODEL ----------------
+num_classes = len(classes)
 
-print("Loading AI model...")
+# -----------------------------
+# LOAD MODEL (ONCE)
+# -----------------------------
 
-checkpoint = torch.load(MODEL_PATH, map_location="cpu")
+model = mobilenet_v2(weights=None)
+model.classifier[1] = torch.nn.Linear(1280, num_classes)
 
-num_classes = checkpoint["classifier.1.weight"].shape[0]
-
-model = models.mobilenet_v2(weights=None)
-model.classifier[1] = nn.Linear(model.last_channel, num_classes)
-
-model.load_state_dict(checkpoint)
+model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
 model.eval()
 
-print("AI model loaded successfully")
+# -----------------------------
+# IMAGE TRANSFORM
+# -----------------------------
 
-# ---------------- USER SYSTEM ----------------
+transform = transforms.Compose([
+    transforms.Resize((224,224)),
+    transforms.ToTensor()
+])
 
-def load_users():
-    if not os.path.exists(USERS_FILE):
+# -----------------------------
+# JSON HELPERS
+# -----------------------------
+
+def load_json(path):
+
+    if not os.path.exists(path):
         return {}
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
 
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f)
+    try:
+        with open(path,"r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_json(path,data):
+
+    with open(path,"w") as f:
+        json.dump(data,f,indent=2)
+
+# -----------------------------
+# AUTH ROUTES
+# -----------------------------
 
 @app.route("/register", methods=["POST"])
 def register():
 
     data = request.json
-    email = data["email"]
-    password = data["password"]
 
-    users = load_users()
+    email = data.get("email")
+    password = data.get("password")
+
+    users = load_json(USERS_FILE)
 
     if email in users:
-        return jsonify({"error": "User already exists"}), 400
+        return jsonify({"error":"User exists"}),400
 
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-    users[email] = hashed
-    save_users(users)
+    users[email] = {
+        "password": hashed
+    }
 
-    return jsonify({"message": "Account created"})
+    save_json(USERS_FILE,users)
+
+    return jsonify({"success":True})
+
 
 @app.route("/login", methods=["POST"])
 def login():
 
     data = request.json
-    email = data["email"]
-    password = data["password"]
 
-    users = load_users()
+    email = data.get("email")
+    password = data.get("password")
+
+    users = load_json(USERS_FILE)
 
     if email not in users:
-        return jsonify({"error": "Invalid login"}), 401
+        return jsonify({"error":"Invalid login"}),401
 
-    stored_hash = users[email]
+    stored = users[email]["password"]
 
-    if bcrypt.checkpw(password.encode(), stored_hash.encode()):
-        return jsonify({"email": email})
+    if not bcrypt.checkpw(password.encode(), stored.encode()):
+        return jsonify({"error":"Invalid login"}),401
 
-    return jsonify({"error": "Invalid login"}), 401
+    return jsonify({
+        "email": email
+    })
 
-# ---------------- HISTORY ----------------
+# -----------------------------
+# HISTORY FUNCTIONS
+# -----------------------------
 
-def save_history(entry):
+def add_history(email,item):
 
-    try:
-        with open(HISTORY_FILE, "r") as f:
-            data = json.load(f)
-    except:
-        data = []
+    history = load_json(HISTORY_FILE)
 
-    data.append(entry)
+    if email not in history:
+        history[email] = []
 
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(data, f)
+    history[email].insert(0,item)
 
-@app.route("/history", methods=["GET"])
-def history():
+    save_json(HISTORY_FILE,history)
 
-    try:
-        with open(HISTORY_FILE, "r") as f:
-            data = json.load(f)
-    except:
-        data = []
 
-    return jsonify(data)
+def get_history(email):
 
-# ---------------- CARE TEXT ----------------
+    history = load_json(HISTORY_FILE)
 
-def generate_texts(name):
+    if email not in history:
+        return []
 
-    if "healthy" in name.lower():
-        return (
-            "Healthy",
-            "The plant appears healthy.",
-            [],
-            []
-        )
+    return history[email]
 
-    return (
-        "Possible Disease",
-        "The plant shows signs of disease or stress.",
-        ["Leaf discoloration", "Possible infection"],
-        [
-            "Remove damaged leaves",
-            "Avoid overwatering",
-            "Provide good sunlight"
-        ]
-    )
-
-def care_levels(name):
-    return "Medium", "High", "Moist"
-
-# ---------------- DISEASE HIGHLIGHT ----------------
-
-def highlight_disease(pil_image):
-
-    img = np.array(pil_image)
-
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-
-    lower = np.array([10,80,80])
-    upper = np.array([40,255,255])
-
-    mask = cv2.inRange(hsv, lower, upper)
-
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-    contours,_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    output = img.copy()
-
-    for c in contours:
-
-        if cv2.contourArea(c) < 200:
-            continue
-
-        x,y,w,h = cv2.boundingRect(c)
-
-        cv2.rectangle(output,(x,y),(x+w,y+h),(255,0,0),3)
-
-        cx = x + w//2
-        cy = y + h//2
-        radius = int(max(w,h)/2)
-
-        cv2.circle(output,(cx,cy),radius,(255,0,0),3)
-
-    return output
-
-# ---------------- PREDICT ----------------
+# -----------------------------
+# PREDICT
+# -----------------------------
 
 @app.route("/predict", methods=["POST"])
 def predict():
 
+    if "image" not in request.files:
+        return jsonify({"error":"no image"}),400
+
     file = request.files["image"]
+    email = request.form.get("email")
 
-    pil_image = Image.open(io.BytesIO(file.read())).convert("RGB")
+    filename = file.filename
+    path = os.path.join(UPLOAD_FOLDER, filename)
 
-    filename = f"{datetime.datetime.now().timestamp()}.jpg"
-    image_path = f"images/{filename}"
+    file.save(path)
 
-    pil_image.save(image_path)
-
-    # highlight disease areas
-    highlighted = highlight_disease(pil_image)
-
-    highlight_name = f"highlight_{filename}"
-    highlight_path = f"images/{highlight_name}"
-
-    cv2.imwrite(highlight_path, highlighted)
-
-    # AI prediction
-    image_tensor = transform(pil_image).unsqueeze(0)
+    image = Image.open(path).convert("RGB")
+    image = transform(image).unsqueeze(0)
 
     with torch.no_grad():
-        outputs = model(image_tensor)
-        probs = torch.nn.functional.softmax(outputs, dim=1)
-        confidence, predicted = torch.max(probs, 1)
 
-    raw_name = classes[predicted.item()]
+        output = model(image)
+        probs = torch.softmax(output,1)
 
-    plant_name = raw_name.replace("___", " - ").replace("_", " ")
+        conf, pred = torch.max(probs,1)
 
-    # health score
-    health = int(confidence.item() * 100)
+        label = classes[pred.item()]
 
-    if "healthy" in plant_name.lower():
-        health = 95
-    else:
-        health = max(40, health)
+        health = int(conf.item()*100)
 
-    # explanation + issues
-    disease, paragraph, issues, tips = generate_texts(plant_name)
-
-    # care information
-    water, sun, soil = care_levels(plant_name)
+    plant = label.split("___")[0]
+    disease = label.split("___")[1]
 
     result = {
-        "plant": plant_name,
+        "plant": plant,
         "disease": disease,
         "health": health,
-        "paragraph": paragraph,
-        "issues": issues,
-        "tips": tips,
-        "water": water,
-        "sun": sun,
-        "soil": soil,
         "image": filename,
-        "highlight": highlight_name,
-        "date": str(datetime.datetime.now())
+        "paragraph": "The plant shows signs related to this disease classification.",
+        "issues": [
+            "Leaf discoloration",
+            "Possible fungal infection"
+        ],
+        "tips": [
+            "Remove infected leaves",
+            "Avoid overhead watering",
+            "Improve air circulation"
+        ],
+        "water": "Medium",
+        "sun": "High",
+        "soil": "Moist",
+        "highlight": filename
     }
 
-    save_history(result)
+    if email:
+        add_history(email,result)
 
     return jsonify(result)
 
-# ---------------- IMAGE ROUTE ----------------
+# -----------------------------
+# HISTORY ROUTE
+# -----------------------------
+
+@app.route("/history/<email>", methods=["GET"])
+def history(email):
+
+    user_history = get_history(email)
+
+    return jsonify(user_history)
+
+# -----------------------------
+# SERVE IMAGES
+# -----------------------------
 
 @app.route("/images/<path:filename>")
-def serve_image(filename):
-    return send_from_directory("images", filename)
+def images(filename):
 
-# ---------------- RUN ----------------
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+# -----------------------------
 
 if __name__ == "__main__":
 
-    print("Plant AI Server Running...")
+    port = int(os.environ.get("PORT",10000))
 
-    port = int(os.environ.get("PORT", 10000))
+    print("Plant AI Server Running...")
 
     app.run(host="0.0.0.0", port=port)
