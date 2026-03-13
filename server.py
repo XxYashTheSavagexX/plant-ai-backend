@@ -150,6 +150,10 @@ def get_history(email):
 @app.route("/predict", methods=["POST"])
 def predict():
 
+    print("PREDICT REQUEST RECEIVED")
+    print("FILES:", request.files)
+    print("FORM:", request.form)
+
     if "image" not in request.files:
         return jsonify({"error":"no image"}),400
 
