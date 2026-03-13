@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import torch
 import torchvision.transforms as transforms
 from torchvision.models import mobilenet_v2
@@ -17,18 +18,8 @@ HISTORY_FILE = "history.json"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# -----------------------------
-# LOAD CLASSES
-# -----------------------------
-
 with open(CLASSES_PATH, "r") as f:
     classes = json.load(f)
-
-num_classes = 50
-
-# -----------------------------
-# LOAD MODEL (ONCE)
-# -----------------------------
 
 model = mobilenet_v2(weights=None)
 model.classifier[1] = torch.nn.Linear(1280, 50)
@@ -36,18 +27,10 @@ model.classifier[1] = torch.nn.Linear(1280, 50)
 model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
 model.eval()
 
-# -----------------------------
-# IMAGE TRANSFORM
-# -----------------------------
-
 transform = transforms.Compose([
     transforms.Resize((224,224)),
     transforms.ToTensor()
 ])
-
-# -----------------------------
-# JSON HELPERS
-# -----------------------------
 
 def load_json(path):
 
@@ -64,10 +47,6 @@ def save_json(path,data):
 
     with open(path,"w") as f:
         json.dump(data,f,indent=2)
-
-# -----------------------------
-# AUTH ROUTES
-# -----------------------------
 
 @app.route("/register", methods=["POST"])
 def register():
@@ -92,7 +71,6 @@ def register():
 
     return jsonify({"success":True})
 
-
 @app.route("/login", methods=["POST"])
 def login():
 
@@ -104,7 +82,7 @@ def login():
     users = load_json(USERS_FILE)
 
     if email not in users:
-        return jsonify({"error": "Invalid login"}), 401
+        return jsonify({"error":"Invalid login"}),401
 
     stored = users[email]
 
@@ -112,15 +90,9 @@ def login():
         stored = stored["password"]
 
     if not bcrypt.checkpw(password.encode(), stored.encode()):
-        return jsonify({"error": "Invalid login"}), 401
+        return jsonify({"error":"Invalid login"}),401
 
-    return jsonify({
-        "email": email
-    })
-
-# -----------------------------
-# HISTORY FUNCTIONS
-# -----------------------------
+    return jsonify({"email":email})
 
 def add_history(email,item):
 
@@ -133,26 +105,16 @@ def add_history(email,item):
 
     save_json(HISTORY_FILE,history)
 
-
 def get_history(email):
 
     history = load_json(HISTORY_FILE)
 
-    if email not in history:
-        return []
-
-    return history[email]
-
-# -----------------------------
-# PREDICT
-# -----------------------------
+    return history.get(email,[])
 
 @app.route("/predict", methods=["POST"])
 def predict():
 
     print("PREDICT REQUEST RECEIVED")
-    print("FILES:", request.files)
-    print("FORM:", request.form)
 
     if "image" not in request.files:
         return jsonify({"error":"no image"}),400
@@ -160,7 +122,7 @@ def predict():
     file = request.files["image"]
     email = request.form.get("email")
 
-    filename = file.filename
+    filename = f"{uuid.uuid4()}.jpg"
     path = os.path.join(UPLOAD_FOLDER, filename)
 
     file.save(path)
@@ -208,27 +170,15 @@ def predict():
 
     return jsonify(result)
 
-# -----------------------------
-# HISTORY ROUTE
-# -----------------------------
-
-@app.route("/history/<email>", methods=["GET"])
+@app.route("/history/<email>")
 def history(email):
 
-    user_history = get_history(email)
-
-    return jsonify(user_history)
-
-# -----------------------------
-# SERVE IMAGES
-# -----------------------------
+    return jsonify(get_history(email))
 
 @app.route("/images/<path:filename>")
 def images(filename):
 
     return send_from_directory(UPLOAD_FOLDER, filename)
-
-# -----------------------------
 
 if __name__ == "__main__":
 
