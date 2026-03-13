@@ -106,7 +106,10 @@ def login():
     if email not in users:
         return jsonify({"error":"Invalid login"}),401
 
-    stored = users[email]["password"]
+    stored = users[email]
+
+if isinstance(stored, dict):
+    stored = stored["password"]
 
     if not bcrypt.checkpw(password.encode(), stored.encode()):
         return jsonify({"error":"Invalid login"}),401
