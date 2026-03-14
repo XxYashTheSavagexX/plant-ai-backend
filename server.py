@@ -63,45 +63,71 @@ def save_json(path,data):
 @app.route("/register", methods=["POST"])
 def register():
 
-    data = request.json
-    email = data.get("email")
-    password = data.get("password")
+    try:
 
-    users = load_json(USERS_FILE)
+        data = request.json
 
-    if email in users:
-        return jsonify({"error":"User exists"}),400
+        if not data:
+            return jsonify({"error": "no data"}), 400
 
-    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        email = data.get("email")
+        password = data.get("password")
 
-    users[email] = {"password": hashed}
+        if not email or not password:
+            return jsonify({"error": "missing fields"}), 400
 
-    save_json(USERS_FILE,users)
+        users = load_json(USERS_FILE)
 
-    return jsonify({"success":True})
+        if email in users:
+            return jsonify({"error": "user exists"}), 400
+
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+        users[email] = {
+            "password": hashed
+        }
+
+        save_json(USERS_FILE, users)
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+
+        print("REGISTER ERROR:", e)
+        return jsonify({"error": "server error"}), 500
 
 
 @app.route("/login", methods=["POST"])
 def login():
 
-    data = request.json
-    email = data.get("email")
-    password = data.get("password")
+    try:
 
-    users = load_json(USERS_FILE)
+        data = request.json
 
-    if email not in users:
-        return jsonify({"error":"Invalid login"}),401
+        if not data:
+            return jsonify({"error": "no data"}), 400
 
-    stored = users[email]
+        email = data.get("email")
+        password = data.get("password")
 
-    if isinstance(stored, dict):
-        stored = stored["password"]
+        users = load_json(USERS_FILE)
 
-    if not bcrypt.checkpw(password.encode(), stored.encode()):
-        return jsonify({"error":"Invalid login"}),401
+        if email not in users:
+            return jsonify({"error": "invalid login"}), 401
 
-    return jsonify({"email":email})
+        stored = users[email]["password"]
+
+        if not bcrypt.checkpw(password.encode(), stored.encode()):
+            return jsonify({"error": "invalid login"}), 401
+
+        return jsonify({
+            "email": email
+        })
+
+    except Exception as e:
+
+        print("LOGIN ERROR:", e)
+        return jsonify({"error": "server error"}), 500
 
 # -----------------------------
 # HISTORY
@@ -290,10 +316,24 @@ def predict():
 # HISTORY ROUTE
 # -----------------------------
 
-@app.route("/history")
-def history():
+@app.route("/history/<email>")
+def history(email):
 
-    return jsonify(get_history())
+    history = load_json(HISTORY_FILE)
+
+    if isinstance(history, dict):
+
+        all_items = []
+
+        for user in history:
+            all_items.extend(history[user])
+
+        return jsonify(all_items)
+
+    if isinstance(history, list):
+        return jsonify(history)
+
+    return jsonify([])
 
 # -----------------------------
 # IMAGE SERVER
