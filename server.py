@@ -7,7 +7,6 @@ from torchvision.models import mobilenet_v2
 from flask import Flask, request, jsonify, send_from_directory
 from PIL import Image
 import bcrypt
-
 import cv2
 import numpy as np
 
@@ -67,7 +66,6 @@ def save_json(path,data):
 def register():
 
     data = request.json
-
     email = data.get("email")
     password = data.get("password")
 
@@ -78,9 +76,7 @@ def register():
 
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-    users[email] = {
-        "password": hashed
-    }
+    users[email] = {"password": hashed}
 
     save_json(USERS_FILE,users)
 
@@ -91,7 +87,6 @@ def register():
 def login():
 
     data = request.json
-
     email = data.get("email")
     password = data.get("password")
 
@@ -138,119 +133,144 @@ def get_history(email):
 @app.route("/predict", methods=["POST"])
 def predict():
 
-    if "image" not in request.files:
-        return jsonify({"error":"no image"}),400
+    try:
 
-    file = request.files["image"]
-    email = request.form.get("email")
+        if "image" not in request.files:
+            return jsonify({"error":"no image"}),400
 
-    filename = f"{uuid.uuid4()}.jpg"
-    path = os.path.join(UPLOAD_FOLDER, filename)
+        file = request.files["image"]
+        email = request.form.get("email")
 
-    file.save(path)
+        filename = f"{uuid.uuid4()}.jpg"
+        path = os.path.join(UPLOAD_FOLDER, filename)
 
-    # -----------------------------
-    # AI MODEL PREDICTION
-    # -----------------------------
+        file.save(path)
 
-    image = Image.open(path).convert("RGB")
-    image_tensor = transform(image).unsqueeze(0)
+        # -----------------------------
+        # LOAD IMAGE SAFELY
+        # -----------------------------
 
-    with torch.no_grad():
+        try:
+            image = Image.open(path).convert("RGB")
+        except:
+            return jsonify({"error":"invalid image"}),400
 
-        output = model(image_tensor)
-        probs = torch.softmax(output,1)
+        image_tensor = transform(image).unsqueeze(0)
 
-        conf, pred = torch.max(probs,1)
+        # -----------------------------
+        # MODEL PREDICTION
+        # -----------------------------
 
-        label = classes[pred.item()]
-        health = int(conf.item()*100)
+        with torch.no_grad():
 
-    plant = label.split("___")[0]
-    disease = label.split("___")[1]
+            output = model(image_tensor)
+            probs = torch.softmax(output,1)
 
-    # -----------------------------
-    # IMPROVED DAMAGE DETECTION
-    # -----------------------------
+            conf, pred = torch.max(probs,1)
 
-    img = cv2.imread(path)
+            try:
+                label = classes[pred.item()]
+            except:
+                label = "Unknown___Unknown"
 
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            health = int(conf.item()*100)
 
-    # yellow disease
-    yellow_lower = np.array([15,80,80])
-    yellow_upper = np.array([35,255,255])
-    yellow_mask = cv2.inRange(hsv,yellow_lower,yellow_upper)
+        plant = label.split("___")[0]
+        disease = label.split("___")[1]
 
-    # brown disease
-    brown_lower = np.array([5,50,50])
-    brown_upper = np.array([20,255,200])
-    brown_mask = cv2.inRange(hsv,brown_lower,brown_upper)
+        # -----------------------------
+        # DAMAGE DETECTION
+        # -----------------------------
 
-    # mildew / white fungus
-    white_lower = np.array([0,0,200])
-    white_upper = np.array([180,60,255])
-    white_mask = cv2.inRange(hsv,white_lower,white_upper)
+        img = cv2.imread(path)
 
-    mask = yellow_mask | brown_mask | white_mask
+        if img is None:
+            return jsonify({"error":"image processing failed"}),400
 
-    kernel = np.ones((5,5),np.uint8)
-    mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,kernel)
+        img = cv2.resize(img,(1024,1024))
 
-    contours,_ = cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    highlight = img.copy()
+        # yellow disease
+        yellow_lower = np.array([15,80,80])
+        yellow_upper = np.array([35,255,255])
+        yellow_mask = cv2.inRange(hsv,yellow_lower,yellow_upper)
 
-    for c in contours:
+        # brown disease
+        brown_lower = np.array([5,50,50])
+        brown_upper = np.array([20,255,200])
+        brown_mask = cv2.inRange(hsv,brown_lower,brown_upper)
 
-        area = cv2.contourArea(c)
+        # mildew / white fungus
+        white_lower = np.array([0,0,200])
+        white_upper = np.array([180,60,255])
+        white_mask = cv2.inRange(hsv,white_lower,white_upper)
 
-        if area > 300:
+        mask = yellow_mask | brown_mask | white_mask
 
-            x,y,w,h = cv2.boundingRect(c)
+        kernel = np.ones((5,5),np.uint8)
+        mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,kernel)
 
-            cv2.rectangle(
-                highlight,
-                (x,y),
-                (x+w,y+h),
-                (0,0,255),
-                3
-            )
+        contours,_ = cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
 
-    highlight_name = f"highlight_{filename}"
-    highlight_path = os.path.join(UPLOAD_FOLDER, highlight_name)
+        highlight = img.copy()
 
-    cv2.imwrite(highlight_path, highlight)
+        for c in contours:
 
-    # -----------------------------
-    # RESPONSE
-    # -----------------------------
+            area = cv2.contourArea(c)
 
-    result = {
-        "plant": plant,
-        "disease": disease,
-        "health": health,
-        "image": filename,
-        "highlight": highlight_name,
-        "paragraph": "The plant shows signs related to this disease classification.",
-        "issues": [
-            "Leaf discoloration",
-            "Possible fungal infection"
-        ],
-        "tips": [
-            "Remove infected leaves",
-            "Avoid overhead watering",
-            "Improve air circulation"
-        ],
-        "water": "Medium",
-        "sun": "High",
-        "soil": "Moist"
-    }
+            if area > 300:
 
-    if email:
-        add_history(email,result)
+                x,y,w,h = cv2.boundingRect(c)
 
-    return jsonify(result)
+                cv2.rectangle(
+                    highlight,
+                    (x,y),
+                    (x+w,y+h),
+                    (0,0,255),
+                    3
+                )
+
+        highlight_name = f"highlight_{filename}"
+        highlight_path = os.path.join(UPLOAD_FOLDER, highlight_name)
+
+        cv2.imwrite(highlight_path, highlight)
+
+        # -----------------------------
+        # RESPONSE
+        # -----------------------------
+
+        result = {
+            "plant": plant,
+            "disease": disease,
+            "health": health,
+            "image": filename,
+            "highlight": highlight_name,
+            "paragraph": "The plant shows signs related to this disease classification.",
+            "issues": [
+                "Leaf discoloration",
+                "Possible fungal infection"
+            ],
+            "tips": [
+                "Remove infected leaves",
+                "Avoid overhead watering",
+                "Improve air circulation"
+            ],
+            "water": "Medium",
+            "sun": "High",
+            "soil": "Moist"
+        }
+
+        if email:
+            add_history(email,result)
+
+        return jsonify(result)
+
+    except Exception as e:
+
+        print("ERROR:", e)
+
+        return jsonify({"error":"server error"}),500
 
 # -----------------------------
 # HISTORY ROUTE
