@@ -23,11 +23,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 with open(CLASSES_PATH, "r") as f:
     classes = json.load(f)
 
-NUM_CLASSES = len(classes)
-
-# -----------------------------
-# LOAD MODEL
-# -----------------------------
+NUM_CLASSES = 50
 
 model = mobilenet_v2(weights=None)
 model.classifier[1] = torch.nn.Linear(1280, NUM_CLASSES)
@@ -175,7 +171,10 @@ def predict():
             if idx >= NUM_CLASSES:
                 idx = NUM_CLASSES - 1
 
-            label = classes[idx]
+            if idx >= len(classes):
+    idx = idx % len(classes)
+
+label = classes[idx]
             health = int(conf.item()*100)
 
         plant = label.split("___")[0]
