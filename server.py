@@ -129,8 +129,6 @@ def get_history(email):
 # -----------------------------
 
 @app.route("/predict", methods=["POST"])
-email = request.form.get("email")
-print("EMAIL RECEIVED:", email)
 def predict():
 
     try:
@@ -140,6 +138,8 @@ def predict():
 
         file = request.files["image"]
         email = request.form.get("email")
+
+        print("EMAIL RECEIVED:", email)
 
         filename = f"{uuid.uuid4()}.jpg"
         path = os.path.join(UPLOAD_FOLDER, filename)
