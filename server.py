@@ -107,22 +107,26 @@ def login():
 # HISTORY
 # -----------------------------
 
-def add_history(email,item):
+def add_history(item):
 
     history = load_json(HISTORY_FILE)
 
-    if email not in history:
-        history[email] = []
+    if not isinstance(history, list):
+        history = []
 
-    history[email].insert(0,item)
+    history.insert(0, item)
 
-    save_json(HISTORY_FILE,history)
+    save_json(HISTORY_FILE, history)
 
-def get_history(email):
+
+def get_history():
 
     history = load_json(HISTORY_FILE)
 
-    return history.get(email,[])
+    if not isinstance(history, list):
+        return []
+
+    return history
 
 # -----------------------------
 # PREDICT
@@ -272,8 +276,7 @@ def predict():
             "soil": "Moist"
         }
 
-        if email:
-            add_history(email,result)
+        add_history(result)
 
         return jsonify(result)
 
@@ -287,10 +290,10 @@ def predict():
 # HISTORY ROUTE
 # -----------------------------
 
-@app.route("/history/<email>")
-def history(email):
+@app.route("/history")
+def history():
 
-    return jsonify(get_history(email))
+    return jsonify(get_history())
 
 # -----------------------------
 # IMAGE SERVER
