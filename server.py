@@ -129,6 +129,8 @@ def get_history(email):
 # -----------------------------
 
 @app.route("/predict", methods=["POST"])
+email = request.form.get("email")
+print("EMAIL RECEIVED:", email)
 def predict():
 
     try:
