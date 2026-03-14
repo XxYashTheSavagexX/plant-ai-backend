@@ -23,12 +23,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 with open(CLASSES_PATH, "r") as f:
     classes = json.load(f)
 
+NUM_CLASSES = len(classes)
+
 # -----------------------------
 # LOAD MODEL
 # -----------------------------
 
 model = mobilenet_v2(weights=None)
-model.classifier[1] = torch.nn.Linear(1280, 50)
+model.classifier[1] = torch.nn.Linear(1280, NUM_CLASSES)
 
 model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
 model.eval()
@@ -168,11 +170,12 @@ def predict():
 
             conf, pred = torch.max(probs,1)
 
-            try:
-                label = classes[pred.item()]
-            except:
-                label = "Unknown___Unknown"
+            idx = pred.item()
 
+            if idx >= NUM_CLASSES:
+                idx = NUM_CLASSES - 1
+
+            label = classes[idx]
             health = int(conf.item()*100)
 
         plant = label.split("___")[0]
@@ -191,27 +194,34 @@ def predict():
 
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        # yellow disease
-        yellow_lower = np.array([15,80,80])
-        yellow_upper = np.array([35,255,255])
-        yellow_mask = cv2.inRange(hsv,yellow_lower,yellow_upper)
+        yellow_mask = cv2.inRange(
+            hsv,
+            np.array([15,80,80]),
+            np.array([35,255,255])
+        )
 
-        # brown disease
-        brown_lower = np.array([5,50,50])
-        brown_upper = np.array([20,255,200])
-        brown_mask = cv2.inRange(hsv,brown_lower,brown_upper)
+        brown_mask = cv2.inRange(
+            hsv,
+            np.array([5,50,50]),
+            np.array([20,255,200])
+        )
 
-        # mildew / white fungus
-        white_lower = np.array([0,0,200])
-        white_upper = np.array([180,60,255])
-        white_mask = cv2.inRange(hsv,white_lower,white_upper)
+        white_mask = cv2.inRange(
+            hsv,
+            np.array([0,0,200]),
+            np.array([180,60,255])
+        )
 
         mask = yellow_mask | brown_mask | white_mask
 
         kernel = np.ones((5,5),np.uint8)
         mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,kernel)
 
-        contours,_ = cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        contours,_ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
 
         highlight = img.copy()
 
@@ -268,7 +278,7 @@ def predict():
 
     except Exception as e:
 
-        print("ERROR:", e)
+        print("SERVER ERROR:", e)
 
         return jsonify({"error":"server error"}),500
 
