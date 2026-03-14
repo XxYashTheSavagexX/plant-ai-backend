@@ -172,9 +172,9 @@ def predict():
                 idx = NUM_CLASSES - 1
 
             if idx >= len(classes):
-    idx = idx % len(classes)
+                idx = idx % len(classes)
 
-label = classes[idx]
+            label = classes[idx]
             health = int(conf.item()*100)
 
         plant = label.split("___")[0]
