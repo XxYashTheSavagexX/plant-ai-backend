@@ -127,28 +127,87 @@ def predict():
 
     file.save(path)
 
+    # -----------------------
+    # AI MODEL PREDICTION
+    # -----------------------
+
     image = Image.open(path).convert("RGB")
-    image = transform(image).unsqueeze(0)
+    image_tensor = transform(image).unsqueeze(0)
 
     with torch.no_grad():
 
-        output = model(image)
+        output = model(image_tensor)
         probs = torch.softmax(output,1)
 
         conf, pred = torch.max(probs,1)
 
         label = classes[pred.item()]
-
         health = int(conf.item()*100)
 
     plant = label.split("___")[0]
     disease = label.split("___")[1]
+
+    # -----------------------
+    # DAMAGE DETECTION
+    # -----------------------
+
+    import cv2
+    import numpy as np
+
+    img = cv2.imread(path)
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    blur = cv2.GaussianBlur(gray,(5,5),0)
+
+    thresh = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11,
+        2
+    )
+
+    contours,_ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    highlight = img.copy()
+
+    for c in contours:
+
+        area = cv2.contourArea(c)
+
+        if area > 500:
+
+            x,y,w,h = cv2.boundingRect(c)
+
+            cv2.rectangle(
+                highlight,
+                (x,y),
+                (x+w,y+h),
+                (0,0,255),
+                3
+            )
+
+    highlight_name = f"highlight_{filename}"
+    highlight_path = os.path.join(UPLOAD_FOLDER, highlight_name)
+
+    cv2.imwrite(highlight_path, highlight)
+
+    # -----------------------
+    # RESPONSE
+    # -----------------------
 
     result = {
         "plant": plant,
         "disease": disease,
         "health": health,
         "image": filename,
+        "highlight": highlight_name,
         "paragraph": "The plant shows signs related to this disease classification.",
         "issues": [
             "Leaf discoloration",
@@ -161,8 +220,7 @@ def predict():
         ],
         "water": "Medium",
         "sun": "High",
-        "soil": "Moist",
-        "highlight": filename
+        "soil": "Moist"
     }
 
     if email:
